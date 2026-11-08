@@ -63,6 +63,31 @@ class SimBroker:
                       "trades": [], "start_cash": self.start_cash}
         self._save()
 
+    # ---- cash movements (used by the wallet) ----
+    def _base(self) -> float:
+        """Net external deposits: the money you put in, excluding profits."""
+        return self.state.get("base", self.state.get("start_cash", self.start_cash))
+
+    def withdraw_cash(self, amount: float) -> float:
+        amount = min(float(amount), self.state["cash"])
+        if amount < 0.01:
+            raise RuntimeError("No free cash to move")
+        self.state["cash"] -= amount
+        self.state["day_start_equity"] = self.state.get("day_start_equity", 0.0) - amount  # not a trading loss
+        self._save()
+        return amount
+
+    def deposit_cash(self, amount: float) -> None:
+        self.state["cash"] += amount
+        self.state["base"] = self._base() + amount  # new principal, not profit
+        self.state["day_start_equity"] = self.state.get("day_start_equity", 0.0) + amount
+        self._save()
+
+    def sweepable_profit(self, pct: float) -> float:
+        """pct% of equity above principal, limited to free cash (we never force-sell to bank)."""
+        profit = float(self.account()["equity"]) - self._base()
+        return max(0.0, min(profit * pct / 100.0, self.state["cash"]))
+
     # ---- broker interface ----
     def clock(self) -> dict:
         return {"is_open": self.ignore_hours or market_open()}

@@ -42,13 +42,13 @@ def plan_orders(target_weights: dict, position_values: dict, equity: float, mana
 
 
 class Alpaca:
-    def __init__(self, live: bool = False):
+    def __init__(self, live: bool = False, base_url: str | None = None):
         key, secret = os.environ.get("ALPACA_KEY_ID"), os.environ.get("ALPACA_SECRET_KEY")
         if not key or not secret:
             raise RuntimeError("Set ALPACA_KEY_ID and ALPACA_SECRET_KEY (a free paper-trading account works).")
         if live and os.environ.get("STOCKBOT_ALLOW_LIVE", "").lower() != "yes":
             raise RuntimeError("Live trading blocked. Set STOCKBOT_ALLOW_LIVE=yes if you really mean it.")
-        self.base = LIVE_URL if live else PAPER_URL
+        self.base = base_url or (LIVE_URL if live else PAPER_URL)
         self.live = live
         self.headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
 

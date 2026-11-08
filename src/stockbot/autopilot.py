@@ -30,6 +30,7 @@ class AutoConfig:
     use_sentiment: bool = True
     countdown_s: int = 60
     poll_minutes: int = 15
+    bank_pct: float = 0.0  # % of profit to move into the virtual wallet after each monthly rebalance (sim only)
     risk: RiskConfig = field(default_factory=RiskConfig)
 
 
@@ -134,6 +135,18 @@ class Autopilot(threading.Thread):
         plan = build_rebalance_plan(self.cfg, self.broker)
         self._execute(plan)  # a cancelled plan is skipped for the month on purpose
         _save_state({"last_rebalance": month})
+        self._bank()
+
+    def _bank(self) -> None:
+        if self.cfg.bank_pct <= 0 or not hasattr(self.broker, "sweepable_profit"):
+            return
+        from .wallet import Wallet
+
+        try:
+            moved = Wallet().bank_profits(self.broker, self.cfg.bank_pct)
+            self.log(f"Banked ${moved:,.2f} of profit into the wallet." if moved else "No profit to bank this month.")
+        except Exception as e:
+            self.log(f"Banking skipped: {e}")
 
     def run(self) -> None:
         self.log(f"Autopilot started ({self.cfg.strategy}, top {self.cfg.top}). Checks every {self.cfg.poll_minutes} min.")

@@ -44,6 +44,17 @@ Long-only opening-range breakout: buy a close above the first-30-minute high and
 
 **It does not work in the only test available.** On 2026-08-14 to 2026-11-06 (15 large caps, 372 trades, 5 bps costs): 39% win rate, profit factor 0.43, **-16.1% total vs -6.8% for equal-weight buy & hold**. Only 5 of 372 trades reached the target. Yahoo only serves about 60 days of 5-minute data, so this window can neither prove nor disprove an edge, but there is no evidence of one. In the US, real day trading in a margin account also requires $25,000+ (pattern day trader rule), and most retail day traders lose money.
 
+## Virtual wallet (simulation only)
+
+Profits earned in the simulator can be moved into a **virtual wallet** so later trading losses can't touch them. It is a local ledger (`~/.stockbot/wallet.json`); it never holds, moves or custodies real money. With a real broker, your actual funds stay at that broker.
+
+```bash
+stockbot wallet                          # balance + history
+stockbot wallet bank --pct 50            # move 50% of profit above your starting money into the wallet
+stockbot wallet fund --amount 1000       # move wallet money back into the trading account (counts as principal)
+stockbot autopilot --anytime --bank-profits 50   # bank 50% of profit after each monthly rebalance
+```
+
 ## Safety layer (all strategies)
 
 - **News/social veto:** Google News (no key) and X/Twitter (optional paid bearer token, `X_BEARER_TOKEN`) headlines are scored with a finance word list; stocks with clearly negative sentiment across 5+ items are skipped. Free feeds have no history, so **this cannot be backtested** and is a safety filter, not a predictor.

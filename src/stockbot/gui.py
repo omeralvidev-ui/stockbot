@@ -26,7 +26,7 @@ class App(tk.Tk):
         self.autopilot = None
         self.v = {k: tk.StringVar(value=d) for k, d in {
             "strategy": "ensemble", "top": "10", "key": "", "secret": "", "xtoken": "",
-            "countdown": "60", "poll": "15", "tickers": "", "broker": "sim"}.items()}
+            "countdown": "60", "poll": "15", "tickers": "", "broker": "sim", "bank": "0"}.items()}
         self.news = tk.BooleanVar(value=True)
         self.anytime = tk.BooleanVar(value=False)
         self._build()
@@ -68,7 +68,7 @@ class App(tk.Tk):
         rows = [("Broker (sim = local virtual money)", "broker", ["sim", "alpaca"]), ("Strategy", "strategy", STRATEGIES), ("Holdings (top N)", "top", None),
                 ("Alpaca PAPER key id", "key", None), ("Alpaca PAPER secret", "secret", "*"),
                 ("X/Twitter bearer token (optional)", "xtoken", "*"),
-                ("Cancel window before trades (sec)", "countdown", None), ("Check every (min)", "poll", None),
+                ("Cancel window before trades (sec)", "countdown", None), ("Check every (min)", "poll", None), ("Bank this % of profit monthly (sim, 0=off)", "bank", None),
                 ("Tickers (blank = default large caps)", "tickers", None)]
         for i, (label, key, kind) in enumerate(rows):
             ttk.Label(f, text=label).grid(row=i, column=0, sticky="w", padx=10, pady=5)
@@ -91,6 +91,10 @@ class App(tk.Tk):
         top = ttk.Frame(self.t_dash); top.pack(fill="x", padx=6, pady=6)
         ttk.Button(top, text="Refresh account", command=self.refresh).pack(side="left")
         self.acct_lbl = ttk.Label(top, text="  not connected", font=("", 11, "bold")); self.acct_lbl.pack(side="left")
+        wrow = ttk.Frame(self.t_dash); wrow.pack(fill="x", padx=6)
+        self.wallet_lbl = ttk.Label(wrow, text="Wallet: $0.00 (virtual, safe from trading losses)")
+        self.wallet_lbl.pack(side="left")
+        ttk.Button(wrow, text="Bank 50% of profit", command=self.bank_profits).pack(side="left", padx=10)
         cols = ("symbol", "qty", "avg entry", "price", "value", "P/L")
         self.tree = ttk.Treeview(self.t_dash, columns=cols, show="headings", height=14)
         for c in cols:
@@ -139,28 +143,69 @@ class App(tk.Tk):
             pass
         self.after(150, self._pump)
 
-    def _apply_env(self):
-        os.environ["ALPACA_KEY_ID"] = self.v["key"].get().strip()
-        os.environ["ALPACA_SECRET_KEY"] = self.v["secret"].get().strip()
+    def _snap(self):
+        """Copy every setting into a plain dict ON THE MAIN THREAD. Tk variables must never be read
+        from background threads (that caused 'main thread is not in main loop' errors)."""
+        try:
+            g = lambda k: self.v[k].get()  # noqa: E731
+            return {"strategy": g("strategy"), "top": int(g("top")), "tickers": g("tickers").strip() or None,
+                    "xtoken": g("xtoken").strip() or None, "news": self.news.get(), "broker": g("broker"),
+                    "anytime": self.anytime.get(), "key": g("key").strip(), "secret": g("secret").strip(),
+                    "countdown": int(g("countdown")), "poll": int(g("poll")), "bank": float(g("bank") or 0)}
+        except ValueError:
+            messagebox.showerror("Settings", "Please check the number fields in Settings (they must be numbers).")
+            return None
 
-    def _broker(self):
-        if self.v["broker"].get() == "sim":
+    def _broker(self, c=None):
+        c = c or self._snap()
+        if c is None:
+            raise RuntimeError("Invalid settings")
+        if c["broker"] == "sim":
             from .sim import SimBroker
 
-            return SimBroker(ignore_hours=self.anytime.get())
+            return SimBroker(ignore_hours=c["anytime"])
         from .broker import Alpaca
 
-        self._apply_env()
+        os.environ["ALPACA_KEY_ID"], os.environ["ALPACA_SECRET_KEY"] = c["key"], c["secret"]
         return Alpaca(live=False)
 
     # ---------- actions ----------
-    def refresh(self):
+    def _wallet_text(self):
+        from .wallet import Wallet
+
+        return f"Wallet: ${Wallet().balance:,.2f} (virtual, safe from trading losses)"
+
+    def bank_profits(self):
+        c = self._snap()
+        if c is None:
+            return
+        if c["broker"] != "sim":
+            messagebox.showinfo("Wallet", "The wallet works with the local simulator only.")
+            return
+
         def fn():
-            b = self._broker()
+            from .wallet import Wallet
+
+            return Wallet().bank_profits(self._broker(c), 50.0)
+
+        def done(moved):
+            messagebox.showinfo("Wallet", f"Moved ${moved:,.2f} of profit into the wallet." if moved
+                                else "No profit above your starting money to bank yet.")
+            self.refresh()
+        self.bg(fn, done)
+
+    def refresh(self):
+        c = self._snap()
+        if c is None:
+            return
+
+        def fn():
+            b = self._broker(c)
             return b.account(), b.positions()
 
         def done(r):
             acct, pos = r
+            self.wallet_lbl.config(text=self._wallet_text())
             self.acct_lbl.config(text=f"  equity ${float(acct['equity']):,.2f}   cash ${float(acct['cash']):,.2f}")
             self.tree.delete(*self.tree.get_children())
             for p in pos:
@@ -170,6 +215,9 @@ class App(tk.Tk):
         self.bg(fn, done)
 
     def compute_signals(self):
+        c = self._snap()
+        if c is None:
+            return
         self._put(self.sig_txt, "Working...\n", clear=True)
 
         def fn():
@@ -177,14 +225,14 @@ class App(tk.Tk):
             from .sentiment import scan
             from .service import load_universe, make_strategy
 
-            stocks, bench = load_universe(self.v["tickers"].get() or None)
-            w = make_strategy(self.v["strategy"].get(), int(self.v["top"].get()))(stocks, bench)
+            stocks, bench = load_universe(c["tickers"])
+            w = make_strategy(c["strategy"], c["top"])(stocks, bench)
             w = w[w > 0].sort_values(ascending=False)
             sent, notes = {}, []
-            if self.news.get() and not w.empty:
-                sent = scan(list(w.index), self.v["xtoken"].get() or None)
+            if c["news"] and not w.empty:
+                sent = scan(list(w.index), c["xtoken"])
                 w, notes = apply_sentiment_overlay(w, sent, RiskConfig())
-            out = [f"Target portfolio as of {stocks.index[-1].date()}  ({self.v['strategy'].get()})\n"]
+            out = [f"Target portfolio as of {stocks.index[-1].date()}  ({c['strategy']})\n"]
             if w[w > 0].empty:
                 out.append("  100% cash (risk-off regime or everything vetoed)\n")
             for sym, wt in w[w > 0].items():
@@ -199,6 +247,9 @@ class App(tk.Tk):
         self.bg(fn, lambda t: self._put(self.sig_txt, t, clear=True))
 
     def run_backtest(self):
+        c = self._snap()
+        if c is None:
+            return
         self._put(self.bt_txt, "Running backtest...\n", clear=True)
 
         def fn():
@@ -206,8 +257,8 @@ class App(tk.Tk):
             from .metrics import compare, format_table
             from .service import load_universe, make_strategy
 
-            stocks, bench = load_universe(self.v["tickers"].get() or None)
-            r = run_backtest(stocks, bench, make_strategy(self.v["strategy"].get(), int(self.v["top"].get())))
+            stocks, bench = load_universe(c["tickers"])
+            r = run_backtest(stocks, bench, make_strategy(c["strategy"], c["top"]))
             s, b = r.equity.iloc[-1], r.bench_equity.iloc[-1]
             return (format_table(compare(r.equity, r.bench_equity)) +
                     f"\n\n$1 grew to {s:.2f} (strategy) vs {b:.2f} (SPY): {'ahead' if s > b else 'BEHIND'}.\n"
@@ -218,11 +269,13 @@ class App(tk.Tk):
         from .autopilot import AutoConfig, Autopilot
 
         try:
-            broker = self._broker()
-            cfg = AutoConfig(strategy=self.v["strategy"].get(), top=int(self.v["top"].get()),
-                             tickers=self.v["tickers"].get() or None, x_token=self.v["xtoken"].get() or None,
-                             use_sentiment=self.news.get(), countdown_s=int(self.v["countdown"].get()),
-                             poll_minutes=int(self.v["poll"].get()))
+            c = self._snap()
+            if c is None:
+                return
+            broker = self._broker(c)
+            cfg = AutoConfig(strategy=c["strategy"], top=c["top"], tickers=c["tickers"], x_token=c["xtoken"],
+                             use_sentiment=c["news"], countdown_s=c["countdown"], poll_minutes=c["poll"],
+                             bank_pct=c["bank"] if c["broker"] == "sim" else 0.0)
         except Exception as e:
             messagebox.showerror("Cannot start", str(e))
             return

@@ -100,7 +100,7 @@ def cmd_autopilot(args) -> int:
 
     cfg = AutoConfig(strategy=args.strategy, top=args.top, tickers=args.tickers, start=args.start,
                      x_token=os.environ.get("X_BEARER_TOKEN"), use_sentiment=not args.no_news,
-                     countdown_s=args.countdown, poll_minutes=args.poll_minutes)
+                     countdown_s=args.countdown, poll_minutes=args.poll_minutes, bank_pct=args.bank_profits)
     ap = Autopilot(cfg, _broker(args), log=lambda m: print(m, flush=True))
     ap.start()
     try:
@@ -152,7 +152,7 @@ def cmd_daytrade(args) -> int:
         print("Day-trading sim portfolio reset.")
         return 0
     dt = DayTrader(make_day_broker(ignore_hours=args.anytime), _watchlist(args), countdown_s=args.countdown,
-                   poll_s=args.poll_seconds, log=lambda m: print(m, flush=True))
+                   poll_s=args.poll_seconds, bank_pct=args.bank_profits, log=lambda m: print(m, flush=True))
     dt.start()
     try:
         while dt.is_alive():
@@ -161,6 +161,32 @@ def cmd_daytrade(args) -> int:
         print("\nStopping...")
         dt.stop()
         dt.join(5)
+    return 0
+
+
+def cmd_wallet(args) -> int:
+    from .daytrader import make_day_broker
+    from .sim import SimBroker
+    from .wallet import Wallet
+
+    w = Wallet()
+    broker = make_day_broker() if args.portfolio == "day" else SimBroker()
+    if args.action == "bank":
+        moved = w.bank(broker, args.amount, "manual") if args.amount else w.bank_profits(broker, args.pct)
+        print(f"Moved ${moved:,.2f} from the {args.portfolio} trading account into the wallet.")
+    elif args.action == "fund":
+        w.fund(broker, args.amount)
+        print(f"Moved ${args.amount:,.2f} from the wallet back into the {args.portfolio} trading account.")
+    elif args.action == "cashout":
+        w.withdraw(args.amount, "virtual cash-out")
+        print(f"Recorded a virtual cash-out of ${args.amount:,.2f}. (No real money moves; this is a local ledger.)")
+    acct = broker.account()
+    print(f"\nWallet balance:         ${w.balance:,.2f}   (safe from trading losses)")
+    print(f"Trading account equity: ${float(acct['equity']):,.2f}  [{args.portfolio}]")
+    print(f"Total (virtual):        ${w.balance + float(acct['equity']):,.2f}")
+    for h in w.history[-8:]:
+        print(f"  {h['t']}  {h['kind']:<8} {h['amount']:>+12,.2f}   balance {h['balance_after']:,.2f}  {h['note']}")
+    print("This wallet is a local ledger of virtual money; it never holds real funds.")
     return 0
 
 
@@ -199,6 +225,8 @@ def main(argv=None) -> int:
         if name == "autopilot":
             sp.add_argument("--countdown", type=int, default=60, help="Seconds to wait (cancel window) before trading")
             sp.add_argument("--poll-minutes", type=int, default=15)
+            sp.add_argument("--bank-profits", type=float, default=0.0, metavar="PCT",
+                            help="Sim only: after each monthly rebalance move PCT%% of profit into the virtual wallet")
     for name, fn, helptext in (("daytrade-backtest", cmd_daytrade_backtest, "EXPERIMENTAL: backtest opening-range breakout on ~60d of 5m data"),
                                ("daytrade", cmd_daytrade, "EXPERIMENTAL: SIM-ONLY live day trader")):
         sp = sub.add_parser(name, help=helptext)
@@ -213,6 +241,14 @@ def main(argv=None) -> int:
             sp.add_argument("--countdown", type=int, default=10, help="Cancel window in seconds before each entry")
             sp.add_argument("--poll-seconds", type=int, default=60)
             sp.add_argument("--reset", action="store_true", help="Reset the day-trading sim portfolio and exit")
+            sp.add_argument("--bank-profits", type=float, default=0.0, metavar="PCT",
+                            help="After the daily flatten, move PCT%% of profit into the virtual wallet")
+    sp = sub.add_parser("wallet", help="Virtual wallet: bank simulated profits, fund the account, view history")
+    sp.add_argument("action", nargs="?", default="show", choices=["show", "bank", "fund", "cashout"])
+    sp.add_argument("--amount", type=float, default=0.0, help="Dollar amount")
+    sp.add_argument("--pct", type=float, default=100.0, help="For 'bank' without --amount: percent of profit to move")
+    sp.add_argument("--portfolio", choices=["swing", "day"], default="swing")
+    sp.set_defaults(fn=cmd_wallet)
     args = p.parse_args(argv)
     try:
         return args.fn(args)

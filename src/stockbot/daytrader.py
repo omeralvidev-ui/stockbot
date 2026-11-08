@@ -28,7 +28,7 @@ def make_day_broker(ignore_hours: bool = False, start_cash: float = 100_000.0) -
 class DayTrader(threading.Thread):
     def __init__(self, broker, watchlist, cfg: ORBConfig | None = None, risk: RiskConfig | None = None,
                  risk_per_trade: float = 0.005, max_position: float = 0.20, max_trades_per_day: int = 6,
-                 countdown_s: int = 10, poll_s: int = 60, log=print, fetch=fetch_intraday, now_fn=None):
+                 countdown_s: int = 10, poll_s: int = 60, bank_pct: float = 0.0, log=print, fetch=fetch_intraday, now_fn=None):
         super().__init__(daemon=True)
         if not isinstance(broker, SimBroker):
             raise TypeError("Day trading is simulation-only; it will not run against a real broker.")
@@ -36,6 +36,7 @@ class DayTrader(threading.Thread):
         self.cfg, self.risk = cfg or ORBConfig(), risk or RiskConfig(daily_loss_halt=0.02)
         self.risk_per_trade, self.max_position, self.max_trades = risk_per_trade, max_position, max_trades_per_day
         self.countdown_s, self.poll_s, self.log, self.fetch = countdown_s, poll_s, log, fetch
+        self.bank_pct, self._banked_day = bank_pct, None
         self.now_fn = now_fn or (lambda: pd.Timestamp.now(tz=NY))
         self.stop_event, self.cancel_event = threading.Event(), threading.Event()
         self._day, self.meta, self.traded, self.n_trades = None, {}, set(), 0
@@ -83,6 +84,15 @@ class DayTrader(threading.Thread):
             elif m and last >= m["target"]:
                 self._close(sym, f"target hit ({last:.2f} >= {m['target']:.2f})")
 
+        if now.time() >= self.cfg.flat_time and self.bank_pct > 0 and self._banked_day != now.date():
+            self._banked_day = now.date()
+            try:
+                from .wallet import Wallet
+
+                moved = Wallet().bank_profits(self.broker, self.bank_pct)
+                self.log(f"Banked ${moved:,.2f} of profit into the wallet." if moved else "No profit to bank today.")
+            except Exception as e:
+                self.log(f"Banking skipped: {e}")
         if halted:
             self.log("DAILY LOSS HALT: no new entries today.")
             return
