@@ -32,6 +32,18 @@ stockbot gui                        # same thing with buttons (Broker = sim is t
 
 Drop `--anytime` to only trade during US market hours. Prices can be ~15 minutes delayed. Real-money trading needs a broker account; `--broker alpaca` supports an Alpaca paper account, and live use is gated behind `--live` plus `STOCKBOT_ALLOW_LIVE=yes`. Test in the sim for months first.
 
+## Day trading (EXPERIMENTAL, simulation only)
+
+```bash
+stockbot daytrade-backtest          # opening-range breakout on ~60 days of 5-minute Yahoo data
+stockbot daytrade                   # live SIM day trader (market hours; add --anytime to test off-hours)
+stockbot daytrade --reset           # reset the day-trading sim portfolio
+```
+
+Long-only opening-range breakout: buy a close above the first-30-minute high and above VWAP (before 15:00), stop at the range low, 2R target, flat by 15:55. Hard limits: 0.5% risk per trade, 20% max position, 6 trades/day, -2% daily-loss halt, a 10-second cancel window before each entry. The live trader **refuses to run against any real broker**; it uses its own virtual portfolio (`~/.stockbot/sim_daytrade.json`).
+
+**It does not work in the only test available.** On 2026-08-14 to 2026-11-06 (15 large caps, 372 trades, 5 bps costs): 39% win rate, profit factor 0.43, **-16.1% total vs -6.8% for equal-weight buy & hold**. Only 5 of 372 trades reached the target. Yahoo only serves about 60 days of 5-minute data, so this window can neither prove nor disprove an edge, but there is no evidence of one. In the US, real day trading in a margin account also requires $25,000+ (pattern day trader rule), and most retail day traders lose money.
+
 ## Safety layer (all strategies)
 
 - **News/social veto:** Google News (no key) and X/Twitter (optional paid bearer token, `X_BEARER_TOKEN`) headlines are scored with a finance word list; stocks with clearly negative sentiment across 5+ items are skipped. Free feeds have no history, so **this cannot be backtested** and is a safety filter, not a predictor.

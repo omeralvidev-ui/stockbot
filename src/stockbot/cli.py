@@ -120,6 +120,50 @@ def cmd_gui(args) -> int:
     return 0
 
 
+def _watchlist(args):
+    from .intraday import DEFAULT_WATCHLIST
+    from .universe import validate_tickers
+
+    return validate_tickers(args.tickers.split(",")) if args.tickers else list(DEFAULT_WATCHLIST)
+
+
+def cmd_daytrade_backtest(args) -> int:
+    from datetime import time as dtime
+
+    from .intraday import ORBConfig, backtest_orb, fetch_intraday
+
+    data = fetch_intraday(_watchlist(args), period=args.period)
+    res = backtest_orb(data, ORBConfig(target_r=args.target_r), cost_bps=args.cost_bps)
+    print("=== EXPERIMENTAL opening-range-breakout day trading (long-only, flat by close) ===")
+    for k, v in res.stats.items():
+        pct = k in ("win rate", "avg trade return", "total return", "max drawdown") or k.startswith("buy&hold")
+        print(f"  {k:<46} {v:.1%}" if pct and isinstance(v, float) else
+              f"  {k:<46} {v:.2f}" if isinstance(v, float) else f"  {k:<46} {v}")
+    print("\nOnly ~60 days of 5-minute data exist on Yahoo, so this is a smoke test, NOT proof of an edge. "
+          + DISCLAIMER)
+    return 0
+
+
+def cmd_daytrade(args) -> int:
+    from .daytrader import DayTrader, make_day_broker
+
+    if args.reset:
+        make_day_broker().reset()
+        print("Day-trading sim portfolio reset.")
+        return 0
+    dt = DayTrader(make_day_broker(ignore_hours=args.anytime), _watchlist(args), countdown_s=args.countdown,
+                   poll_s=args.poll_seconds, log=lambda m: print(m, flush=True))
+    dt.start()
+    try:
+        while dt.is_alive():
+            dt.join(1)
+    except KeyboardInterrupt:
+        print("\nStopping...")
+        dt.stop()
+        dt.join(5)
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="stockbot", description="Stocks-only research and paper-trading bot.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -155,6 +199,20 @@ def main(argv=None) -> int:
         if name == "autopilot":
             sp.add_argument("--countdown", type=int, default=60, help="Seconds to wait (cancel window) before trading")
             sp.add_argument("--poll-minutes", type=int, default=15)
+    for name, fn, helptext in (("daytrade-backtest", cmd_daytrade_backtest, "EXPERIMENTAL: backtest opening-range breakout on ~60d of 5m data"),
+                               ("daytrade", cmd_daytrade, "EXPERIMENTAL: SIM-ONLY live day trader")):
+        sp = sub.add_parser(name, help=helptext)
+        sp.add_argument("--tickers", help="Comma-separated watchlist (default: 15 liquid large caps)")
+        sp.set_defaults(fn=fn)
+        if name == "daytrade-backtest":
+            sp.add_argument("--period", default="60d", help="Yahoo caps 5-minute data at 60d")
+            sp.add_argument("--cost-bps", type=float, default=5.0)
+            sp.add_argument("--target-r", type=float, default=2.0)
+        else:
+            sp.add_argument("--anytime", action="store_true", help="Trade even when the US market is closed (will have stale data)")
+            sp.add_argument("--countdown", type=int, default=10, help="Cancel window in seconds before each entry")
+            sp.add_argument("--poll-seconds", type=int, default=60)
+            sp.add_argument("--reset", action="store_true", help="Reset the day-trading sim portfolio and exit")
     args = p.parse_args(argv)
     try:
         return args.fn(args)
