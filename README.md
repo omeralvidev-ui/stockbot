@@ -121,6 +121,10 @@ pytest
 
 CI runs the tests on Ubuntu, Windows and macOS.
 
+## Credits
+
+Created and directed by **Omer Alvi** (idea, requirements, product decisions, publishing). Code written with **Claude** (Anthropic's AI model) under Omer's direction, which is why commits carry a `Co-Authored-By: Claude` line. Use it however you like under the MIT licence.
+
 ## License
 
 MIT
