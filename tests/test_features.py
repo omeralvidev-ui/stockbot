@@ -97,3 +97,42 @@ def test_gui_builds():
         pytest.skip("no display")
     app.update()
     app.destroy()
+
+
+def test_sim_broker_buy_sell_and_persistence(tmp_path):
+    from stockbot.sim import SimBroker
+
+    prices = {"AAA": 100.0}
+    q = lambda syms: {s: prices[s] for s in syms if s in prices}  # noqa: E731
+    b = SimBroker(path=tmp_path / "p.json", start_cash=1000.0, slippage_bps=0.0, quote_fn=q)
+    b.submit(Order("AAA", "buy", 500.0))
+    assert float(b.account()["cash"]) == pytest.approx(500.0)
+    prices["AAA"] = 110.0
+    assert float(b.account()["equity"]) == pytest.approx(1050.0)
+    assert float(b.positions()[0]["unrealized_plpc"]) == pytest.approx(0.10)
+    b2 = SimBroker(path=tmp_path / "p.json", slippage_bps=0.0, quote_fn=q)  # state survives restart
+    assert b2.position_values()["AAA"] == pytest.approx(550.0)
+    b2.submit(Order("AAA", "sell", 0.0, close_all=True))
+    assert b2.positions() == [] and float(b2.account()["cash"]) == pytest.approx(1050.0)
+    with pytest.raises(RuntimeError):
+        b2.submit(Order("AAA", "sell", 10.0))
+
+
+def test_sim_cannot_overspend(tmp_path):
+    from stockbot.sim import SimBroker
+
+    b = SimBroker(path=tmp_path / "p.json", start_cash=100.0, slippage_bps=0.0, quote_fn=lambda s: {"AAA": 10.0})
+    b.submit(Order("AAA", "buy", 5000.0))
+    assert float(b.account()["cash"]) >= -1e-9
+
+
+def test_market_hours():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from stockbot.sim import market_open
+
+    ny = ZoneInfo("America/New_York")
+    assert market_open(datetime(2026, 11, 9, 10, 0, tzinfo=ny))  # Monday 10:00
+    assert not market_open(datetime(2026, 11, 9, 17, 0, tzinfo=ny))
+    assert not market_open(datetime(2026, 11, 8, 11, 0, tzinfo=ny))  # Sunday

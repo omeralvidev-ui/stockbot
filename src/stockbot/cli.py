@@ -68,6 +68,10 @@ def cmd_signals(args) -> int:
 
 
 def _broker(args):
+    if args.broker == "sim":
+        from .sim import SimBroker
+
+        return SimBroker(start_cash=args.sim_cash, ignore_hours=args.anytime)
     from .broker import Alpaca
 
     return Alpaca(live=args.live)
@@ -80,7 +84,8 @@ def cmd_trade(args) -> int:
     cfg = AutoConfig(strategy=args.strategy, top=args.top, tickers=args.tickers, start=args.start,
                      x_token=os.environ.get("X_BEARER_TOKEN"), use_sentiment=not args.no_news)
     plan = build_rebalance_plan(cfg, broker)
-    print(f"{'LIVE' if args.live else 'PAPER'} account. {plan.describe()}")
+    label = "LOCAL SIMULATION" if args.broker == "sim" else ("LIVE" if args.live else "PAPER")
+    print(f"{label} account. {plan.describe()}")
     if not args.execute:
         print("Dry run. Re-run with --execute to place these orders.")
         return 0
@@ -139,7 +144,11 @@ def main(argv=None) -> int:
         if name == "signals":
             sp.add_argument("--news", action="store_true", help="Apply Google News / X sentiment veto")
         if name in ("trade", "autopilot"):
-            sp.add_argument("--live", action="store_true", help="Use a live account (also needs STOCKBOT_ALLOW_LIVE=yes)")
+            sp.add_argument("--broker", choices=["sim", "alpaca"], default="sim",
+                            help="sim = local virtual money at real yfinance prices (default); alpaca = Alpaca account")
+            sp.add_argument("--sim-cash", type=float, default=100_000.0, help="Starting virtual cash (new sim only)")
+            sp.add_argument("--anytime", action="store_true", help="Sim only: trade even when the US market is closed")
+            sp.add_argument("--live", action="store_true", help="Alpaca only: use a live account (also needs STOCKBOT_ALLOW_LIVE=yes)")
             sp.add_argument("--no-news", action="store_true", help="Disable the sentiment veto")
         if name == "trade":
             sp.add_argument("--execute", action="store_true", help="Actually place orders")

@@ -12,13 +12,25 @@ A **stocks-only** research, backtesting and paper-trading bot for Windows, macOS
 | `stockbot signals` | Today's target portfolio |
 | `stockbot trade` | Rebalance an [Alpaca](https://alpaca.markets) **paper** account (dry run unless `--execute`) |
 | `stockbot autopilot` | Unattended: checks every N minutes, **announces** what it will do, waits a cancel window, then trades |
-| `stockbot gui` / `stockbot-gui` | Desktop app: dashboard, signals + news, backtest, autopilot with pop-up countdown (paper only) |
+| `stockbot gui` / `stockbot-gui` | Desktop app: dashboard, signals + news, backtest, autopilot with pop-up countdown (sim or Alpaca paper) |
 
 Strategies (`--strategy`):
 
 - `momentum` (default): 12-1 month momentum, top-N positive-momentum stocks, inverse-volatility weights (25% cap), and a regime filter that moves to cash when SPY is below its 200-day average.
 - `ensemble`: average of `momentum` and `ml`, scaled down to a 15% volatility target.
 - `ml`: gradient-boosted model that predicts next-month cross-sectional return rank from momentum, volatility and relative-strength features. Trained walk-forward only on outcomes already known on each decision date, retrained every 6 months.
+
+## Trading on your own computer (no broker needed)
+
+yfinance only supplies prices; it cannot place orders. So `trade` and `autopilot` default to a **local simulated broker** (`--broker sim`): virtual money (default $100,000), real yfinance prices, 5 bps slippage, portfolio saved in `~/.stockbot/sim_portfolio.json`. Nothing touches a real brokerage.
+
+```bash
+stockbot trade --anytime            # preview a rebalance (add --execute to fill it in the sim)
+stockbot autopilot --anytime        # runs forever: announce, 60s cancel window, trade
+stockbot gui                        # same thing with buttons (Broker = sim is the default)
+```
+
+Drop `--anytime` to only trade during US market hours. Prices can be ~15 minutes delayed. Real-money trading needs a broker account; `--broker alpaca` supports an Alpaca paper account, and live use is gated behind `--live` plus `STOCKBOT_ALLOW_LIVE=yes`. Test in the sim for months first.
 
 ## Safety layer (all strategies)
 

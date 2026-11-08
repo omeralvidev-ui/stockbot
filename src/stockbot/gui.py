@@ -1,6 +1,6 @@
 """Desktop app (Tkinter - ships with Python on Windows, macOS and Linux).
 
-The app trades PAPER accounts only. Keys typed here live in memory for this session and
+The app trades a local simulation (default) or an Alpaca PAPER account - never live money. Keys typed here live in memory for this session and
 are never written to disk.
 """
 from __future__ import annotations
@@ -26,14 +26,15 @@ class App(tk.Tk):
         self.autopilot = None
         self.v = {k: tk.StringVar(value=d) for k, d in {
             "strategy": "ensemble", "top": "10", "key": "", "secret": "", "xtoken": "",
-            "countdown": "60", "poll": "15", "tickers": ""}.items()}
+            "countdown": "60", "poll": "15", "tickers": "", "broker": "sim"}.items()}
         self.news = tk.BooleanVar(value=True)
+        self.anytime = tk.BooleanVar(value=False)
         self._build()
         self.after(150, self._pump)
 
     # ---------- layout ----------
     def _build(self):
-        banner = ttk.Label(self, text="Paper trading only. Not financial advice. No strategy is guaranteed to beat the market.",
+        banner = ttk.Label(self, text="Simulated/paper trading only. Not financial advice. No strategy is guaranteed to beat the market.",
                            foreground="#8a1c1c", padding=6)
         banner.pack(fill="x")
         nb = ttk.Notebook(self)
@@ -64,7 +65,7 @@ class App(tk.Tk):
 
     def _settings(self):
         f = self.t_set
-        rows = [("Strategy", "strategy", STRATEGIES), ("Holdings (top N)", "top", None),
+        rows = [("Broker (sim = local virtual money)", "broker", ["sim", "alpaca"]), ("Strategy", "strategy", STRATEGIES), ("Holdings (top N)", "top", None),
                 ("Alpaca PAPER key id", "key", None), ("Alpaca PAPER secret", "secret", "*"),
                 ("X/Twitter bearer token (optional)", "xtoken", "*"),
                 ("Cancel window before trades (sec)", "countdown", None), ("Check every (min)", "poll", None),
@@ -78,11 +79,13 @@ class App(tk.Tk):
             w.grid(row=i, column=1, sticky="w", pady=5)
         ttk.Checkbutton(f, text="Use Google News / X sentiment veto", variable=self.news).grid(
             row=len(rows), column=1, sticky="w", pady=5)
+        ttk.Checkbutton(f, text="Sim only: trade even when the market is closed", variable=self.anytime).grid(
+            row=len(rows) + 2, column=1, sticky="w", pady=5)
         ttk.Label(f, wraplength=640, foreground="#555", text=(
             "Get free paper keys at alpaca.markets. X/Twitter search needs a paid developer bearer token; "
             "without it only Google News is used. Sentiment can't be backtested, so it is used only to "
             "skip stocks with clearly negative news, never to pick them.")).grid(
-            row=len(rows) + 1, column=0, columnspan=2, sticky="w", padx=10, pady=10)
+            row=len(rows) + 3, column=0, columnspan=2, sticky="w", padx=10, pady=10)
 
     def _dashboard(self):
         top = ttk.Frame(self.t_dash); top.pack(fill="x", padx=6, pady=6)
@@ -141,6 +144,10 @@ class App(tk.Tk):
         os.environ["ALPACA_SECRET_KEY"] = self.v["secret"].get().strip()
 
     def _broker(self):
+        if self.v["broker"].get() == "sim":
+            from .sim import SimBroker
+
+            return SimBroker(ignore_hours=self.anytime.get())
         from .broker import Alpaca
 
         self._apply_env()
