@@ -65,9 +65,11 @@ class Alpaca:
     def clock(self) -> dict:
         return self._req("GET", "/v2/clock")
 
+    def positions(self) -> list:
+        return [p for p in self._req("GET", "/v2/positions") if p.get("asset_class", "us_equity") == "us_equity"]
+
     def position_values(self) -> dict:
-        return {p["symbol"]: float(p["market_value"]) for p in self._req("GET", "/v2/positions")
-                if p.get("asset_class", "us_equity") == "us_equity"}
+        return {p["symbol"]: float(p["market_value"]) for p in self.positions()}
 
     def submit(self, order: Order):
         if order.close_all:

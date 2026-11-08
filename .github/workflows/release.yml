@@ -1,0 +1,22 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e . pyinstaller
+      - run: pyinstaller --onefile --windowed --name stockbot-gui --collect-submodules sklearn --collect-all yfinance packaging/gui_entry.py
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

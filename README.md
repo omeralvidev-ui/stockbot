@@ -11,11 +11,20 @@ A **stocks-only** research, backtesting and paper-trading bot for Windows, macOS
 | `stockbot backtest` | Walk-forward backtest vs SPY with costs, 1-day execution lag, optional out-of-sample slice |
 | `stockbot signals` | Today's target portfolio |
 | `stockbot trade` | Rebalance an [Alpaca](https://alpaca.markets) **paper** account (dry run unless `--execute`) |
+| `stockbot autopilot` | Unattended: checks every N minutes, **announces** what it will do, waits a cancel window, then trades |
+| `stockbot gui` / `stockbot-gui` | Desktop app: dashboard, signals + news, backtest, autopilot with pop-up countdown (paper only) |
 
 Strategies (`--strategy`):
 
 - `momentum` (default): 12-1 month momentum, top-N positive-momentum stocks, inverse-volatility weights (25% cap), and a regime filter that moves to cash when SPY is below its 200-day average.
+- `ensemble`: average of `momentum` and `ml`, scaled down to a 15% volatility target.
 - `ml`: gradient-boosted model that predicts next-month cross-sectional return rank from momentum, volatility and relative-strength features. Trained walk-forward only on outcomes already known on each decision date, retrained every 6 months.
+
+## Safety layer (all strategies)
+
+- **News/social veto:** Google News (no key) and X/Twitter (optional paid bearer token, `X_BEARER_TOKEN`) headlines are scored with a finance word list; stocks with clearly negative sentiment across 5+ items are skipped. Free feeds have no history, so **this cannot be backtested** and is a safety filter, not a predictor.
+- Stop-loss at -12% from entry, daily-loss halt at -3%, 25% max position, cash buffer.
+- Autopilot shows a pop-up/log message with every planned order and a cancel countdown (default 60s) before anything is sent.
 
 ## Install
 
@@ -53,8 +62,13 @@ Live trading is blocked unless you pass `--live` **and** set `STOCKBOT_ALLOW_LIV
 | SPY | 15.1% | 0.89 | -33.7% | 1.00 | 12.20 |
 | momentum | 16.0% | 0.91 | -29.0% | 0.62 | 13.98 |
 | ml | 14.4% | 0.86 | -29.9% | 0.58 | 10.95 |
+| ensemble | 13.7% | 0.98 | -23.8% | 0.50 | 9.72 |
 
-Since 2018 (out-of-sample slice) both strategies trail SPY on total return (momentum 11.0% vs 13.7% CAGR; ml 13.1% vs 13.7%), though with smaller drawdowns. **Conclusion: no reliable edge over buy-and-hold SPY here.** Momentum's full-period lead is small and fades out of sample. The value is in lower drawdown and a framework to test your own ideas.
+Since 2018 (out-of-sample slice) both strategies trail SPY on total return (momentum 11.0% vs 13.7% CAGR; ml 13.1% vs 13.7%), though with smaller drawdowns. The ensemble has the best risk-adjusted numbers (Sharpe 0.98, -23.8% drawdown) but earns less in total (beta 0.5, so it sits partly in cash). **Conclusion: no reliable edge over buy-and-hold SPY here.** Momentum's full-period lead is small and fades out of sample. The value is in lower drawdown and a framework to test your own ideas.
+
+## Desktop installers
+
+Pushing a tag like `v0.2.0` runs `.github/workflows/release.yml`, which builds a PyInstaller app on Windows, macOS and Linux and attaches it to a GitHub Release. These builds are untested until the first run; if one fails, `pip install -e .` and `stockbot-gui` always works.
 
 ## Known limitations
 

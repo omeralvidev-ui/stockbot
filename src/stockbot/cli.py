@@ -1,42 +1,29 @@
-"""Command line interface: backtest | signals | trade."""
+"""Command line interface: backtest | signals | trade | autopilot | gui."""
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 import pandas as pd
 
 from .backtest import run_backtest
-from .data import load_prices
 from .metrics import compare, format_table
-from .strategies import Momentum
-from .universe import BENCHMARK, DEFAULT_UNIVERSE, validate_tickers
+from .service import STRATEGIES, load_universe, make_strategy
+from .universe import BENCHMARK
 
 DISCLAIMER = ("Research software, not financial advice. Past/backtested performance does not "
               "predict future results; you can lose money.")
 
 
-def _strategy(args):
-    if args.strategy == "ml":
-        from .ml import MLRank
-
-        return MLRank(top_n=args.top, risk_off_exposure=args.risk_off)
-    return Momentum(top_n=args.top, risk_off_exposure=args.risk_off)
-
-
 def _load(args):
-    tickers = validate_tickers(args.tickers.split(",")) if args.tickers else list(DEFAULT_UNIVERSE)
-    tickers = [t for t in tickers if t != BENCHMARK]
-    px = load_prices(tickers + [BENCHMARK], start=args.start, use_cache=not args.no_cache)
-    bench = px[BENCHMARK]
-    stocks = px.drop(columns=[BENCHMARK]).dropna(axis=1, how="all")
-    return stocks, bench
+    return load_universe(args.tickers, args.start, not args.no_cache)
 
 
 def cmd_backtest(args) -> int:
     stocks, bench = _load(args)
     print(f"Universe: {stocks.shape[1]} stocks, {stocks.index[0].date()} -> {stocks.index[-1].date()}")
-    res = run_backtest(stocks, bench, _strategy(args), cost_bps=args.cost_bps)
+    res = run_backtest(stocks, bench, make_strategy(args.strategy, args.top, args.risk_off), cost_bps=args.cost_bps)
     print(f"\n=== {args.strategy} vs {BENCHMARK} (full period, costs {args.cost_bps} bps) ===")
     print(format_table(compare(res.equity, res.bench_equity, BENCHMARK)))
     print(f"Average turnover per rebalance: {res.turnover:.0%}")
@@ -58,47 +45,86 @@ def cmd_backtest(args) -> int:
 
 def cmd_signals(args) -> int:
     stocks, bench = _load(args)
-    w = _strategy(args)(stocks, bench)
+    w = make_strategy(args.strategy, args.top, args.risk_off)(stocks, bench)
     w = w[w > 0].sort_values(ascending=False)
+    sent = {}
+    if args.news and not w.empty:
+        from .risk import RiskConfig, apply_sentiment_overlay
+        from .sentiment import scan
+
+        sent = scan(list(w.index), os.environ.get("X_BEARER_TOKEN"))
+        w, notes = apply_sentiment_overlay(w, sent, RiskConfig())
+        w = w[w > 0]
+        for n in notes:
+            print("  ! " + n)
     print(f"Target portfolio as of {stocks.index[-1].date()} ({args.strategy}):")
     if w.empty:
         print("  100% cash (risk-off regime or no qualifying stocks)")
     for sym, wt in w.items():
-        print(f"  {sym:<6} {wt:6.1%}")
+        extra = f"  news {sent[sym].score:+.2f} ({sent[sym].n} items)" if sym in sent else ""
+        print(f"  {sym:<6} {wt:6.1%}{extra}")
     print(f"  cash   {1 - w.sum():6.1%}\n{DISCLAIMER}")
     return 0
 
 
-def cmd_trade(args) -> int:
-    from .broker import Alpaca, plan_orders
+def _broker(args):
+    from .broker import Alpaca
 
-    stocks, bench = _load(args)
-    w = _strategy(args)(stocks, bench)
-    broker = Alpaca(live=args.live)
-    equity = float(broker.account()["equity"])
-    orders = plan_orders(w[w > 0].to_dict(), broker.position_values(), equity, set(stocks.columns))
-    print(f"{'LIVE' if args.live else 'PAPER'} account equity ${equity:,.2f}; {len(orders)} order(s):")
-    for o in orders:
-        print(f"  {o.side.upper():<4} {o.symbol:<6} ${o.notional:,.2f}{' (close position)' if o.close_all else ''}")
+    return Alpaca(live=args.live)
+
+
+def cmd_trade(args) -> int:
+    from .autopilot import AutoConfig, build_rebalance_plan
+
+    broker = _broker(args)
+    cfg = AutoConfig(strategy=args.strategy, top=args.top, tickers=args.tickers, start=args.start,
+                     x_token=os.environ.get("X_BEARER_TOKEN"), use_sentiment=not args.no_news)
+    plan = build_rebalance_plan(cfg, broker)
+    print(f"{'LIVE' if args.live else 'PAPER'} account. {plan.describe()}")
     if not args.execute:
         print("Dry run. Re-run with --execute to place these orders.")
         return 0
-    if not broker.clock().get("is_open"):
-        print("Market is closed; orders would queue until the next open.")
-    for o in orders:
+    for o in plan.orders:
         broker.submit(o)
     print("Orders submitted.")
+    return 0
+
+
+def cmd_autopilot(args) -> int:
+    from .autopilot import AutoConfig, Autopilot
+
+    cfg = AutoConfig(strategy=args.strategy, top=args.top, tickers=args.tickers, start=args.start,
+                     x_token=os.environ.get("X_BEARER_TOKEN"), use_sentiment=not args.no_news,
+                     countdown_s=args.countdown, poll_minutes=args.poll_minutes)
+    ap = Autopilot(cfg, _broker(args), log=lambda m: print(m, flush=True))
+    ap.start()
+    try:
+        while ap.is_alive():
+            ap.join(1)
+    except KeyboardInterrupt:
+        print("\nStopping...")
+        ap.stop()
+        ap.join(5)
+    return 0
+
+
+def cmd_gui(args) -> int:
+    from .gui import main as gui_main
+
+    gui_main()
     return 0
 
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="stockbot", description="Stocks-only research and paper-trading bot.")
     sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("gui", help="Open the desktop app").set_defaults(fn=cmd_gui)
     for name, fn, helptext in (("backtest", cmd_backtest, "Backtest vs SPY"),
                                ("signals", cmd_signals, "Show today's target portfolio"),
-                               ("trade", cmd_trade, "Rebalance an Alpaca account (dry run by default)")):
+                               ("trade", cmd_trade, "Rebalance an Alpaca account (dry run by default)"),
+                               ("autopilot", cmd_autopilot, "Run unattended: announce, wait, trade")):
         sp = sub.add_parser(name, help=helptext)
-        sp.add_argument("--strategy", choices=["momentum", "ml"], default="momentum")
+        sp.add_argument("--strategy", choices=STRATEGIES, default="momentum")
         sp.add_argument("--tickers", help="Comma-separated stock tickers (default: built-in large caps)")
         sp.add_argument("--start", default="2008-01-01")
         sp.add_argument("--top", type=int, default=10, help="Number of holdings")
@@ -110,9 +136,16 @@ def main(argv=None) -> int:
             sp.add_argument("--cost-bps", type=float, default=5.0, help="Cost per traded dollar, in bps")
             sp.add_argument("--oos-start", help="Also report stats from this date (e.g. 2018-01-01)")
             sp.add_argument("--out", help="Write equity curves to this CSV")
+        if name == "signals":
+            sp.add_argument("--news", action="store_true", help="Apply Google News / X sentiment veto")
+        if name in ("trade", "autopilot"):
+            sp.add_argument("--live", action="store_true", help="Use a live account (also needs STOCKBOT_ALLOW_LIVE=yes)")
+            sp.add_argument("--no-news", action="store_true", help="Disable the sentiment veto")
         if name == "trade":
             sp.add_argument("--execute", action="store_true", help="Actually place orders")
-            sp.add_argument("--live", action="store_true", help="Use a live account (also needs STOCKBOT_ALLOW_LIVE=yes)")
+        if name == "autopilot":
+            sp.add_argument("--countdown", type=int, default=60, help="Seconds to wait (cancel window) before trading")
+            sp.add_argument("--poll-minutes", type=int, default=15)
     args = p.parse_args(argv)
     try:
         return args.fn(args)
