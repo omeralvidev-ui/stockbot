@@ -22,10 +22,10 @@ Cutting g and resetting at the right time is what saves usage.
 9. **Ask once, up front** if the task is ambiguous; don't iterate on guesses.
 
 ## When to reset
-Optimal reset interval `m* = sqrt(2·w·R / (r·g))` with cache write w=1.25, read r=0.1, rebuild cost R, growth g.
-Typical R=15k, g=3k ⇒ m* ≈ 11 turns. In practice: **`/clear` between unrelated tasks, `/compact` around turn ~10–15 of a single task**, and keep a short `NOTES.md` of decisions so a reset loses nothing.
+Optimal reset interval `m* = sqrt(2·w·R / (ρ·g))`, ρ = p·w + (1−p)·r (w=1.25 write, r=0.1 read, p = share of turns after a cache expiry, R rebuild cost, g growth).
+Typical R=15k, g=3k, p=0.1 ⇒ m* ≈ 8 turns; long pauses expire the cache, so finish or `/clear` before breaks. In practice: **`/clear` between unrelated tasks, `/compact` around turn ~8–15 of a single task**, and keep a short `NOTES.md` of decisions so a reset loses nothing.
 
-Run `python scripts/budget.py --n 40 --limit 2000000` (in the plugin dir) to compute numbers for the current session.
+Run `python scripts/budget.py --n 40 --p 0.1 --limit 2000000` (in the plugin dir) to compute numbers for the current session.
 
 ## Stack notes
 - **Minecraft (Fabric/Forge/NeoForge):** don't read decompiled/mapped sources or `run/`; check one class via grep. Keep Gradle output to `tail`. Use `--offline` and `--daemon`.

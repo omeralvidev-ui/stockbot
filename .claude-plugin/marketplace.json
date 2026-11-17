@@ -1,0 +1,11 @@
+{
+  "name": "claude-usage-saver",
+  "owner": { "name": "claude-usage-saver contributors" },
+  "plugins": [
+    {
+      "name": "claude-usage-saver",
+      "source": "./",
+      "description": "Stretch Claude limits for Minecraft, Roblox, app and web development."
+    }
+  ]
+}

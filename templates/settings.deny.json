@@ -3,9 +3,11 @@
     "deny": [
       "Read(./node_modules/**)", "Read(./dist/**)", "Read(./build/**)", "Read(./.next/**)",
       "Read(./.gradle/**)", "Read(./run/**)", "Read(./out/**)", "Read(./Packages/**)",
-      "Read(./**/*.lock)", "Read(./**/package-lock.json)", "Read(./**/*.min.js)", "Read(./**/*.map)",
+      "Read(./**/*.min.js)", "Read(./**/*.map)",
       "Read(./**/*.rbxl)", "Read(./**/*.rbxlx)", "Read(./**/*.jar)", "Read(./**/*.class)"
+    ],
+    "ask": [
+      "Read(./**/*.lock)", "Read(./**/package-lock.json)", "Read(./**/pnpm-lock.yaml)"
     ]
-  },
-  "env": { "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1" }
+  }
 }
