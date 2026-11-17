@@ -1,0 +1,6 @@
+{
+  "name": "claude-usage-saver",
+  "version": "1.0.0",
+  "description": "Stretch your Claude limits when building Minecraft mods, Roblox games, apps and websites. Token-budget rules, math-based reset timing, and per-stack CLAUDE.md templates.",
+  "license": "MIT"
+}
